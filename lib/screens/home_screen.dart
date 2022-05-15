@@ -2,8 +2,9 @@ import 'package:chat_app/theme.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
+import '../screens/screens.dart';
 import '../widgets/glowing_action_button.dart';
-import '../helpers.dart';
+import '../app.dart';
 import '../widgets/icon_buttons.dart';
 import '../widgets/avatar.dart';
 import '../pages/calls_page.dart';
@@ -15,7 +16,7 @@ class HomeScreen extends StatelessWidget {
   HomeScreen({Key? key}) : super(key: key);
 
   final ValueNotifier<int> pageIndex = ValueNotifier(0);
-  final ValueNotifier<String> title = ValueNotifier('Messages');
+  final ValueNotifier<String> title = ValueNotifier('Chats');
 
   final pages = const [
     MessagesPage(),
@@ -25,7 +26,7 @@ class HomeScreen extends StatelessWidget {
   ];
 
   final pageTitles = [
-    'Messages',
+    'Chats',
     'Notifications',
     'Calls',
     'Contacts',
@@ -72,7 +73,15 @@ class HomeScreen extends StatelessWidget {
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 24.0),
-            child: Avatar.small(url: Helpers.randomPictureUrl()),
+            child: Hero(
+              tag: 'hero-profile-picture',
+              child: Avatar.small(
+                url: context.currentUserImage,
+                onTap: () {
+                  Navigator.of(context).push(ProfileScreen.route);
+                },
+              ),
+            ),
           ),
         ],
       ),
@@ -128,14 +137,12 @@ class _BottomNavigationBarState extends State<_BottomNavigationBar> {
               _NavigationBarItem(
                 index: 0,
                 isSelected: (selectedIndex == 0),
-                label: 'Messages',
                 icon: CupertinoIcons.bubble_left_bubble_right_fill,
                 onTap: handleItemSelected,
               ),
               _NavigationBarItem(
                 index: 1,
                 isSelected: (selectedIndex == 1),
-                label: 'Notifications',
                 icon: CupertinoIcons.bell_solid,
                 onTap: handleItemSelected,
               ),
@@ -144,20 +151,28 @@ class _BottomNavigationBarState extends State<_BottomNavigationBar> {
                 child: GlowingActionButton(
                   color: AppColors.secondary,
                   icon: CupertinoIcons.add,
-                  onPressed: () {},
+                  onPressed: () {
+                    showDialog(
+                      context: context,
+                      builder: (BuildContext context) => const Dialog(
+                        child: AspectRatio(
+                          aspectRatio: 5 / 7,
+                          child: ContactsPage(),
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ),
               _NavigationBarItem(
                 index: 2,
                 isSelected: (selectedIndex == 2),
-                label: 'Calls',
                 icon: CupertinoIcons.phone_fill,
                 onTap: handleItemSelected,
               ),
               _NavigationBarItem(
                 index: 3,
                 isSelected: (selectedIndex == 3),
-                label: 'Contacts',
                 icon: CupertinoIcons.person_2_fill,
                 onTap: handleItemSelected,
               ),
@@ -170,7 +185,6 @@ class _BottomNavigationBarState extends State<_BottomNavigationBar> {
 }
 
 class _NavigationBarItem extends StatelessWidget {
-  final String label;
   final IconData icon;
   final int index;
   final bool isSelected;
@@ -178,7 +192,6 @@ class _NavigationBarItem extends StatelessWidget {
 
   const _NavigationBarItem({
     Key? key,
-    required this.label,
     required this.icon,
     required this.index,
     required this.onTap,
@@ -194,28 +207,10 @@ class _NavigationBarItem extends StatelessWidget {
       },
       child: SizedBox(
         width: 70,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 20,
-              color: isSelected ? AppColors.secondary : null,
-            ),
-            const SizedBox(
-              height: 8,
-            ),
-            Text(
-              label,
-              style: isSelected
-                  ? const TextStyle(
-                      fontSize: 11,
-                      color: AppColors.secondary,
-                      fontWeight: FontWeight.bold,
-                    )
-                  : const TextStyle(fontSize: 11),
-            ),
-          ],
+        child: Icon(
+          icon,
+          size: 25,
+          color: isSelected ? AppColors.secondary : null,
         ),
       ),
     );

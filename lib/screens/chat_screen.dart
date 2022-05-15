@@ -1,23 +1,59 @@
-import 'package:chat_app/theme.dart';
-import 'package:chat_app/widgets/icon_buttons.dart';
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:jiffy/jiffy.dart';
+import 'package:collection/collection.dart' show IterableExtension;
+import 'package:stream_chat_flutter_core/stream_chat_flutter_core.dart';
 
-import '../models/message_data.dart';
+import '../helpers.dart';
+import '../theme.dart';
+import '../widgets/icon_buttons.dart';
+import '../widgets/display_error_message.dart';
+import '../app.dart';
 import '../widgets/avatar.dart';
 import '../widgets/glowing_action_button.dart';
 
-class ChatScreen extends StatelessWidget {
-  static Route route(MessageData data) => MaterialPageRoute(
-        builder: (context) => ChatScreen(messageData: data),
+class ChatScreen extends StatefulWidget {
+  static Route routeWithChannel(Channel channel) => MaterialPageRoute(
+        builder: (context) => StreamChannel(
+          child: const ChatScreen(),
+          channel: channel,
+        ),
       );
-
-  final MessageData messageData;
 
   const ChatScreen({
     Key? key,
-    required this.messageData,
   }) : super(key: key);
+
+  @override
+  State<ChatScreen> createState() => _ChatScreenState();
+}
+
+class _ChatScreenState extends State<ChatScreen> {
+  late StreamSubscription<int> unreadCountSubscription;
+
+  @override
+  void initState() {
+    unreadCountSubscription = StreamChannel.of(context)
+        .channel
+        .state!
+        .unreadCountStream
+        .listen(_unreadCountHandler);
+    super.initState();
+  }
+
+  Future<void> _unreadCountHandler(int count) async {
+    if (count > 0) {
+      await StreamChannel.of(context).channel.markRead();
+    }
+  }
+
+  @override
+  void dispose() {
+    unreadCountSubscription.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -35,7 +71,7 @@ class ChatScreen extends StatelessWidget {
             },
           ),
         ),
-        title: _AppBarTitle(messageData: messageData),
+        title: const _AppBarTitle(),
         actions: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8.0),
@@ -58,63 +94,92 @@ class ChatScreen extends StatelessWidget {
         ],
       ),
       body: Column(
-        children: const [
+        children: [
           Expanded(
-            child: _DemoMessageList(),
+            child: MessageListCore(
+              messageListBuilder: (context, messages) =>
+                  _MessageList(messages: messages),
+              loadingBuilder: (context) {
+                return const Center(
+                  child: CircularProgressIndicator(),
+                );
+              },
+              emptyBuilder: (context) => const SizedBox.shrink(),
+              errorBuilder: (contex, error) => DisplayErrorMessage(
+                error: error,
+              ),
+            ),
           ),
-          _ActionBar(),
+          const _ActionBar(),
         ],
       ),
     );
   }
 }
 
-class _DemoMessageList extends StatelessWidget {
-  const _DemoMessageList({Key? key}) : super(key: key);
+class _MessageList extends StatelessWidget {
+  const _MessageList({
+    Key? key,
+    required this.messages,
+  }) : super(key: key);
+
+  final List<Message> messages;
+
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: ListView(
+      padding: const EdgeInsets.all(8.0),
+      child: ListView.separated(
         physics: const BouncingScrollPhysics(
             parent: AlwaysScrollableScrollPhysics()),
-        children: const [
-          _DateLabel(label: 'Yesterday'),
-          _MessageTile(
-            message: 'Hi Lucy! How are you?',
-            messageDate: '12:01 PM',
-          ),
-          _MessageOwnTile(
-            message: 'I am just fine. And you?',
-            messageDate: '12:02 PM',
-          ),
-          _MessageTile(
-            message: 'I am fine. Wanna go to starbucks?',
-            messageDate: '12:02 PM',
-          ),
-          _MessageOwnTile(
-            message: 'That would be a great idea Lucy. When to go?',
-            messageDate: '12:03 PM',
-          ),
-          _MessageTile(
-            message:
-                'Tomorrow at 12 Noon would be fine. Can you pick me up from my school?',
-            messageDate: '12:05 PM',
-          ),
-        ],
+        itemCount: messages.length + 1,
+        reverse: true,
+        separatorBuilder: (context, index) {
+          if (index == messages.length - 1) {
+            return _DateLabel(dateTime: messages[index].createdAt);
+          }
+          if (messages.length == 1) {
+            return const SizedBox.shrink();
+          } else if (index >= messages.length - 1) {
+            return const SizedBox.shrink();
+          } else if (index <= messages.length) {
+            final message = messages[index];
+            final nextMessage = messages[index + 1];
+            if (!Jiffy(message.createdAt.toLocal())
+                .isSame(nextMessage.createdAt.toLocal(), Units.DAY)) {
+              return _DateLabel(
+                dateTime: message.createdAt,
+              );
+            } else {
+              return const SizedBox.shrink();
+            }
+          } else {
+            return const SizedBox.shrink();
+          }
+        },
+        itemBuilder: (context, index) {
+          if (index < messages.length) {
+            final message = messages[index];
+            if (message.user?.id == context.currentUser?.id) {
+              return _MessageOwnTile(message: message);
+            } else {
+              return _MessageTile(message: message);
+            }
+          } else {
+            return const SizedBox.shrink();
+          }
+        },
       ),
     );
   }
 }
 
 class _MessageTile extends StatelessWidget {
-  final String message;
-  final String messageDate;
+  final Message message;
 
   const _MessageTile({
     Key? key,
     required this.message,
-    required this.messageDate,
   }) : super(key: key);
 
   static const _borderRadius = 20.0;
@@ -130,13 +195,16 @@ class _MessageTile extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
-              width: MediaQuery.of(context).size.width * 0.8,
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.8,
+              ),
               decoration: BoxDecoration(
                 color: Theme.of(context).cardColor,
                 borderRadius: const BorderRadius.only(
                   topLeft: Radius.circular(_borderRadius),
                   topRight: Radius.circular(_borderRadius),
                   bottomRight: Radius.circular(_borderRadius),
+                  bottomLeft: Radius.circular(5),
                 ),
               ),
               child: Padding(
@@ -144,16 +212,21 @@ class _MessageTile extends StatelessWidget {
                   horizontal: 12.0,
                   vertical: 12.0,
                 ),
-                child: Text(message),
+                child: Text(
+                  message.text ?? '',
+                  style: const TextStyle(
+                    fontSize: 12,
+                  ),
+                ),
               ),
             ),
-            Padding(
+            Container(
               padding: const EdgeInsets.only(top: 8.0),
               child: Text(
-                messageDate,
+                Jiffy(message.createdAt.toLocal()).jm,
                 style: const TextStyle(
                   color: AppColors.textFaded,
-                  fontSize: 10,
+                  fontSize: 8,
                   fontWeight: FontWeight.bold,
                 ),
               ),
@@ -166,13 +239,11 @@ class _MessageTile extends StatelessWidget {
 }
 
 class _MessageOwnTile extends StatelessWidget {
-  final String message;
-  final String messageDate;
+  final Message message;
 
   const _MessageOwnTile({
     Key? key,
     required this.message,
-    required this.messageDate,
   }) : super(key: key);
 
   static const _borderRadius = 20.0;
@@ -188,13 +259,16 @@ class _MessageOwnTile extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Container(
-              width: MediaQuery.of(context).size.width * 0.8,
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.8,
+              ),
               decoration: const BoxDecoration(
                 color: AppColors.secondary,
                 borderRadius: BorderRadius.only(
                   topLeft: Radius.circular(_borderRadius),
                   topRight: Radius.circular(_borderRadius),
                   bottomLeft: Radius.circular(_borderRadius),
+                  bottomRight: Radius.circular(5),
                 ),
               ),
               child: Padding(
@@ -202,16 +276,21 @@ class _MessageOwnTile extends StatelessWidget {
                   horizontal: 12.0,
                   vertical: 12.0,
                 ),
-                child: Text(message),
+                child: Text(
+                  message.text ?? '',
+                  style: const TextStyle(
+                    fontSize: 14,
+                  ),
+                ),
               ),
             ),
-            Padding(
+            Container(
               padding: const EdgeInsets.only(top: 8.0),
               child: Text(
-                messageDate,
+                Jiffy(message.createdAt.toLocal()).jm,
                 style: const TextStyle(
                   color: AppColors.textFaded,
-                  fontSize: 10,
+                  fontSize: 8,
                   fontWeight: FontWeight.bold,
                 ),
               ),
@@ -223,13 +302,47 @@ class _MessageOwnTile extends StatelessWidget {
   }
 }
 
-class _DateLabel extends StatelessWidget {
-  final String label;
+class _DateLabel extends StatefulWidget {
+  final DateTime dateTime;
 
   const _DateLabel({
     Key? key,
-    required this.label,
+    required this.dateTime,
   }) : super(key: key);
+
+  @override
+  State<_DateLabel> createState() => _DateLabelState();
+}
+
+class _DateLabelState extends State<_DateLabel> {
+  late String dayInfo;
+
+  @override
+  void initState() {
+    final createdAt = Jiffy(widget.dateTime);
+    final now = DateTime.now();
+
+    if (Jiffy(createdAt).isSame(now, Units.DAY)) {
+      dayInfo = 'Today';
+    } else if (Jiffy(createdAt)
+        .isSame(now.subtract(const Duration(days: 1)), Units.DAY)) {
+      dayInfo = 'Yesterday';
+    } else if (Jiffy(createdAt).isAfter(
+      now.subtract(const Duration(days: 7)),
+      Units.DAY,
+    )) {
+      dayInfo = createdAt.EEEE;
+    } else if (Jiffy(createdAt).isAfter(
+      Jiffy(now).subtract(years: 1),
+      Units.DAY,
+    )) {
+      dayInfo = createdAt.MMMd;
+    } else {
+      dayInfo = createdAt.MMMd;
+    }
+
+    super.initState();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -244,7 +357,7 @@ class _DateLabel extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 12),
             child: Text(
-              label,
+              dayInfo,
               style: const TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
@@ -259,22 +372,20 @@ class _DateLabel extends StatelessWidget {
 }
 
 class _AppBarTitle extends StatelessWidget {
-  final MessageData messageData;
-
   const _AppBarTitle({
     Key? key,
-    required this.messageData,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
+    final channel = StreamChannel.of(context).channel;
     return Row(
       children: [
         Avatar.small(
-          url: messageData.profilePicture,
+          url: Helpers.getChannelImage(channel, context.currentUser!),
         ),
         const SizedBox(
-          width: 16,
+          width: 10,
         ),
         Expanded(
           child: Column(
@@ -282,23 +393,187 @@ class _AppBarTitle extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                messageData.senderName,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 14),
-              ),
-              const SizedBox(height: 2),
-              const Text(
-                'Online',
-                style: TextStyle(
-                  fontSize: 10,
+                Helpers.getChannelName(channel, context.currentUser!),
+                overflow: TextOverflow.fade,
+                style: const TextStyle(
+                  fontSize: 12,
                   fontWeight: FontWeight.bold,
-                  color: Colors.green,
+                ),
+              ),
+              const SizedBox(
+                height: 2,
+              ),
+              BetterStreamBuilder<List<Member>>(
+                stream: channel.state!.membersStream,
+                initialData: channel.state!.members,
+                builder: (context, data) => ConnectionStatusBuilder(
+                  statusBuilder: (context, status) {
+                    switch (status) {
+                      case ConnectionStatus.connected:
+                        return _buildConnectedTitleState(context, data);
+                      case ConnectionStatus.connecting:
+                        return const Text(
+                          'Connecting',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green,
+                          ),
+                        );
+                      case ConnectionStatus.disconnected:
+                        return const Text(
+                          'Offline',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red,
+                          ),
+                        );
+                      default:
+                        return const SizedBox.shrink();
+                    }
+                  },
                 ),
               ),
             ],
           ),
         )
       ],
+    );
+  }
+
+  Widget _buildConnectedTitleState(
+    BuildContext context,
+    List<Member>? members,
+  ) {
+    Widget? alternativeWidget;
+    final channel = StreamChannel.of(context).channel;
+    final memberCount = channel.memberCount;
+    if (memberCount != null && memberCount > 2) {
+      var text = 'Members: $memberCount';
+      final watcherCount = channel.state?.watcherCount ?? 0;
+      if (watcherCount > 0) {
+        text = 'watchers $watcherCount';
+      }
+      alternativeWidget = Text(
+        text,
+      );
+    } else {
+      final userId = StreamChatCore.of(context).currentUser?.id;
+      final otherMember = members?.firstWhereOrNull(
+        (element) => element.userId != userId,
+      );
+
+      if (otherMember != null) {
+        if (otherMember.user?.online == true) {
+          alternativeWidget = const Text(
+            'Active now',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              color: Colors.green,
+            ),
+          );
+        } else {
+          alternativeWidget = Text(
+            'Last seen '
+            '${Jiffy(otherMember.user?.lastActive).fromNow()}',
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              color: AppColors.secondary,
+            ),
+          );
+        }
+      }
+    }
+
+    return TypingIndicator(
+      alternativeWidget: alternativeWidget,
+    );
+  }
+}
+
+class TypingIndicator extends StatelessWidget {
+  const TypingIndicator({
+    Key? key,
+    this.alternativeWidget,
+  }) : super(key: key);
+
+  final Widget? alternativeWidget;
+
+  @override
+  Widget build(BuildContext context) {
+    final channelState = StreamChannel.of(context).channel.state!;
+
+    final altWidget = alternativeWidget ?? const SizedBox.shrink();
+
+    return BetterStreamBuilder<Iterable<User>>(
+      initialData: channelState.typingEvents.keys,
+      stream: channelState.typingEventsStream
+          .map((typings) => typings.entries.map((e) => e.key)),
+      builder: (context, data) {
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            child: data.isNotEmpty == true
+                ? const Align(
+                    alignment: Alignment.centerLeft,
+                    key: ValueKey('typing-text'),
+                    child: Text(
+                      'Typing...',
+                      maxLines: 1,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green,
+                      ),
+                    ),
+                  )
+                : Align(
+                    alignment: Alignment.centerLeft,
+                    key: const ValueKey('altwidget'),
+                    child: altWidget,
+                  ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class ConnectionStatusBuilder extends StatelessWidget {
+  const ConnectionStatusBuilder({
+    Key? key,
+    required this.statusBuilder,
+    this.connectionStatusStream,
+    this.errorBuilder,
+    this.loadingBuilder,
+  }) : super(key: key);
+
+  final Stream<ConnectionStatus>? connectionStatusStream;
+  final Widget Function(BuildContext context, Object? error)? errorBuilder;
+  final WidgetBuilder? loadingBuilder;
+  final Widget Function(BuildContext context, ConnectionStatus status)
+      statusBuilder;
+
+  @override
+  Widget build(BuildContext context) {
+    final stream = connectionStatusStream ??
+        StreamChatCore.of(context).client.wsConnectionStatusStream;
+    final client = StreamChatCore.of(context).client;
+    return BetterStreamBuilder<ConnectionStatus>(
+      initialData: client.wsConnectionStatus,
+      stream: stream,
+      noDataBuilder: loadingBuilder,
+      errorBuilder: (context, error) {
+        if (errorBuilder != null) {
+          return errorBuilder!(context, error);
+        }
+        return const Offstage();
+      },
+      builder: statusBuilder,
     );
   }
 }
@@ -347,56 +622,79 @@ class _ActionBar extends StatefulWidget {
 }
 
 class __ActionBarState extends State<_ActionBar> {
+  final TextEditingController controller = TextEditingController();
+
+  Future<void> _sendMessage() async {
+    if (controller.text.isNotEmpty) {
+      StreamChannel.of(context)
+          .channel
+          .sendMessage(Message(text: controller.text));
+      controller.clear();
+      FocusScope.of(context).unfocus();
+    }
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
       bottom: true,
       top: false,
-      child: Row(
-        children: [
-          Container(
-            decoration: BoxDecoration(
-              border: Border(
-                right: BorderSide(
-                  width: 2,
-                  color: Theme.of(context).dividerColor,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                border: Border(
+                  right: BorderSide(
+                    width: 2,
+                    color: Theme.of(context).dividerColor,
+                  ),
+                ),
+              ),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16.0),
+                child: Icon(
+                  CupertinoIcons.camera_fill,
                 ),
               ),
             ),
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16.0),
-              child: Icon(
-                CupertinoIcons.camera_fill,
-              ),
-            ),
-          ),
-          const Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(left: 16.0),
-              child: TextField(
-                style: TextStyle(fontSize: 14),
-                decoration: InputDecoration(
-                  hintText: 'Type something...',
-                  border: InputBorder.none,
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(left: 16.0),
+                child: TextField(
+                  controller: controller,
+                  onChanged: (val) {
+                    StreamChannel.of(context).channel.keyStroke();
+                  },
+                  style: const TextStyle(fontSize: 14),
+                  decoration: const InputDecoration(
+                    hintText: 'Start typing...',
+                    border: InputBorder.none,
+                  ),
+                  onSubmitted: (_) => _sendMessage(),
                 ),
               ),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(
-              left: 12,
-              right: 24.0,
+            Padding(
+              padding: const EdgeInsets.only(
+                left: 12,
+                right: 16.0,
+              ),
+              child: GlowingActionButton(
+                color: AppColors.accent,
+                icon: Icons.send_rounded,
+                onPressed: _sendMessage,
+              ),
             ),
-            child: GlowingActionButton(
-              color: AppColors.accent,
-              icon: Icons.send_rounded,
-              onPressed: () {
-                // ignore: avoid_print
-                print('ToDo: Send a message');
-              },
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
